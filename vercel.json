@@ -1,0 +1,14 @@
+{
+  "builds": [
+    {
+      "src": "blink-detector/package.json",
+      "use": "@vercel/next"
+    }
+  ],
+  "routes": [
+    {
+      "src": "/(.*)",
+      "dest": "blink-detector/$1"
+    }
+  ]
+} 

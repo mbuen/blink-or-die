@@ -1,6 +1,6 @@
 'use client'
 
-import { useRef, useEffect, useState, useCallback } from 'react'
+import { useRef, useEffect, useState } from 'react'
 
 // Declare MediaPipe types
 declare global {
@@ -30,9 +30,9 @@ const MIN_BLINK_FRAMES = 3
 const ROLLING_WINDOW_MINUTES = 4  // Note: Python has bug, shows 2 but uses 4
 
 // Alert parameters (EXACT COPY FROM PYTHON) 
-const LOW_BLINK_THRESHOLD = 10
-const ALERT_COOLDOWN = 60  // seconds
-const MIN_SESSION_TIME = 30  // seconds
+const DEFAULT_LOW_BLINK_THRESHOLD = 10
+const ALERT_COOLDOWN = 5  // seconds
+const MIN_SESSION_TIME = 0  // seconds
 const MIN_BLINKS_FOR_ALERT = 3
 
 interface EyeLandmark {
@@ -80,30 +80,6 @@ function calculateBlinkRate(blinkTimestamps: number[], windowMinutes = ROLLING_W
   const elapsedMinutes = Math.max(elapsedTime / (60 * 1000), 1/60)
   
   return recentBlinks.length / elapsedMinutes
-}
-
-// EXACT PORT: show_notification function from Python
-function showNotification(title: string, message: string): boolean {
-  if ('Notification' in window) {
-    if (Notification.permission === 'granted') {
-      new Notification(title, {
-        body: message,
-        icon: '/favicon.ico'
-      })
-      return true
-    } else if (Notification.permission !== 'denied') {
-      Notification.requestPermission().then(permission => {
-        if (permission === 'granted') {
-          new Notification(title, {
-            body: message,
-            icon: '/favicon.ico'
-          })
-        }
-      })
-    }
-  }
-  console.log(`${title}: ${message}`)
-  return false
 }
 
 // ENHANCED: Multi-method notification system (like Python's guaranteed dialogs)
@@ -237,7 +213,6 @@ function showEnhancedNotification(title: string, message: string, onDismiss?: ()
 
 export default function BlinkDetector() {
   const videoRef = useRef<HTMLVideoElement>(null)
-  const canvasRef = useRef<HTMLCanvasElement>(null)
   const faceMeshRef = useRef<any>(null)
   
   // EXACT PORT: Python global variables converted to state
@@ -247,6 +222,9 @@ export default function BlinkDetector() {
   const [baselineEAR, setBaselineEAR] = useState<number | null>(null)
   const [lastAlertTime, setLastAlertTime] = useState(0)
   const [startTime, setStartTime] = useState(Date.now())
+  
+  // Configurable alert threshold
+  const [lowBlinkThreshold, setLowBlinkThreshold] = useState(DEFAULT_LOW_BLINK_THRESHOLD)
   
   // Use refs for values that need to be current in callbacks but shouldn't trigger re-renders
   const consecutiveBlinkFramesRef = useRef(0)
@@ -258,6 +236,11 @@ export default function BlinkDetector() {
   const lastAlertTimeRef = useRef(0)
   const isAlertActiveRef = useRef(false) // Prevent multiple simultaneous alerts
   const startTimeRef = useRef(startTime) // For immediate access in callbacks
+  
+  // Use ref for onResults function so MediaPipe always calls the latest version
+  const onResultsRef = useRef<((results: any) => void) | null>(null)
+  
+
   
   // Display state
   const [statusText, setStatusText] = useState('Starting...')
@@ -352,6 +335,7 @@ export default function BlinkDetector() {
   useEffect(() => {
     let faceMesh: any = null
     let isProcessing = false
+    let cleanupProcessing: (() => void) | null = null
     
     const initMediaPipe = async () => {
       try {
@@ -376,8 +360,10 @@ export default function BlinkDetector() {
         })
         
         faceMesh.onResults((results: any) => {
-          console.log('📊 MediaPipe results received:', results.multiFaceLandmarks ? 'Face detected' : 'No face')
-          onResults(results)
+          // console.log('📊 MediaPipe results received:', results.multiFaceLandmarks ? 'Face detected' : 'No face')
+          if (onResultsRef.current) {
+            onResultsRef.current(results)
+          }
         })
         
         faceMeshRef.current = faceMesh
@@ -385,6 +371,9 @@ export default function BlinkDetector() {
         setStatusText('MediaPipe ready. Requesting camera...')
         
         await startCamera()
+        
+        // Start video processing and get cleanup function
+        cleanupProcessing = processVideo() || (() => {})
         
         // Request notification permissions
         if ('Notification' in window) {
@@ -399,8 +388,15 @@ export default function BlinkDetector() {
     initMediaPipe()
     
     return () => {
+      console.log('🔄 Cleaning up MediaPipe and processing...')
+      
+      // Stop video processing first
+      if (cleanupProcessing) {
+        cleanupProcessing()
+      }
+      
+      // Close MediaPipe
       if (faceMesh) {
-        console.log('🔄 Cleaning up MediaPipe...')
         faceMesh.close()
       }
     }
@@ -444,6 +440,69 @@ export default function BlinkDetector() {
     window.addEventListener('keydown', handleKeyPress)
     return () => window.removeEventListener('keydown', handleKeyPress)
   }, [showAlertModal])
+  
+  // ENHANCED: Tab visibility monitoring for debugging background processing
+  useEffect(() => {
+    let visibilityLogInterval: NodeJS.Timeout | null = null
+    let lastProcessingTime = Date.now()
+    let processingFrameCount = 0
+    
+    const handleVisibilityChange = () => {
+      const now = Date.now()
+      const isHidden = document.hidden
+      
+      console.log(`🔄 TAB VISIBILITY CHANGED: ${isHidden ? 'HIDDEN' : 'VISIBLE'} at ${new Date(now).toLocaleTimeString()}`)
+      
+      if (isHidden) {
+        console.log('⚠️ Tab is now hidden - starting background monitoring...')
+        
+        // Start periodic logging to see if processing continues
+        visibilityLogInterval = setInterval(() => {
+          const video = videoRef.current
+          const timeSinceLastProcessing = Date.now() - lastProcessingTime
+          
+          console.log(`🕐 BACKGROUND CHECK: ${new Date().toLocaleTimeString()}`)
+          console.log(`  📹 Video state: readyState=${video?.readyState}, paused=${video?.paused}, ended=${video?.ended}`)
+          console.log(`  🎬 Last processing: ${timeSinceLastProcessing}ms ago`)
+          console.log(`  📊 Processing frames since hidden: ${processingFrameCount}`)
+          console.log(`  📱 Document hidden: ${document.hidden}`)
+          
+          processingFrameCount = 0 // Reset counter
+        }, 2000) // Check every 2 seconds
+        
+      } else {
+        console.log('✅ Tab is now visible - stopping background monitoring')
+        if (visibilityLogInterval) {
+          clearInterval(visibilityLogInterval)
+          visibilityLogInterval = null
+        }
+      }
+    }
+    
+    // Monitor processing activity
+    const trackProcessing = () => {
+      lastProcessingTime = Date.now()
+      if (document.hidden) {
+        processingFrameCount++
+      }
+    }
+    
+    // Expose tracking function globally so processVideo can call it
+    (window as any).trackProcessing = trackProcessing
+    
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+    
+    // Initial log
+    console.log(`🔍 VISIBILITY MONITORING STARTED: Tab is ${document.hidden ? 'HIDDEN' : 'VISIBLE'}`)
+    
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
+      if (visibilityLogInterval) {
+        clearInterval(visibilityLogInterval)
+      }
+      delete (window as any).trackProcessing
+    }
+  }, [])
   
   // ENHANCED: Proactive notification permission request
   useEffect(() => {
@@ -501,9 +560,9 @@ export default function BlinkDetector() {
         videoRef.current.srcObject = stream
         
         videoRef.current.onloadedmetadata = () => {
-          console.log('🎥 Video metadata loaded, starting playback...')
+          // console.log('🎥 Video metadata loaded, starting playback...')
           videoRef.current?.play().then(() => {
-            console.log('▶️ Video playback started')
+            // console.log('▶️ Video playback started')
             setStatusText('Camera ready. Look normally for calibration...')
             // Small delay to ensure video is fully ready
             setTimeout(processVideo, 100)
@@ -530,32 +589,189 @@ export default function BlinkDetector() {
       const video = videoRef.current
       const faceMesh = faceMeshRef.current
       let frameCount = 0
+      let lastLogTime = Date.now()
+      let processingInterval: NodeJS.Timeout | null = null
       
       const process = async () => {
         try {
+          // Track processing activity for visibility monitoring
+          if ((window as any).trackProcessing) {
+            (window as any).trackProcessing()
+          }
+          
+          const now = Date.now()
+          const isHidden = document.hidden
+          
+          // Enhanced logging every 30 frames OR every 5 seconds when hidden
+          const shouldLog = (frameCount % 30 === 0) || (isHidden && now - lastLogTime > 5000)
+          
+          if (shouldLog) {
+            console.log(`🎥 PROCESSING LOOP: Frame ${frameCount}, Hidden=${isHidden}, Video=${video.readyState}/${video.paused}/${video.ended}`)
+            if (isHidden) {
+              console.log(`  🔍 Background processing active: ${now - lastLogTime}ms since last log`)
+              lastLogTime = now
+            }
+          }
+          
           if (video.readyState === 4 && !video.paused && !video.ended) {
             frameCount++
-            if (frameCount % 30 === 0) {
-              console.log(`🎥 Processing frame ${frameCount}, video dimensions: ${video.videoWidth}x${video.videoHeight}`)
+            
+            // ENHANCED: Track video frame freshness when hidden
+            if (isHidden) {
+              const videoCurrentTime = video.currentTime
+              const videoTimeKey = `lastVideoTime_${video.src || 'default'}`
+              const lastVideoTime = (window as any)[videoTimeKey] || 0
+              
+              if (frameCount % 10 === 0) {
+                const videoFreshness = videoCurrentTime - lastVideoTime
+                console.log(`  📹 VIDEO FRAME CHECK: currentTime=${videoCurrentTime.toFixed(3)}s, freshness=${videoFreshness.toFixed(3)}s`)
+                console.log(`  📤 Sending frame ${frameCount} to MediaPipe while hidden`)
+                
+                // Track MediaPipe processing time
+                const mediaPipeStart = Date.now()
+                try {
+                  await faceMesh.send({ image: video })
+                  const mediaPipeTime = Date.now() - mediaPipeStart
+                  console.log(`  ⚡ MediaPipe processing time: ${mediaPipeTime}ms`)
+                } catch (mediaPipeError) {
+                  console.error(`  💥 MediaPipe send failed:`, mediaPipeError)
+                  // Continue processing even if MediaPipe fails
+                }
+              } else {
+                try {
+                  await faceMesh.send({ image: video })
+                } catch (mediaPipeError) {
+                  console.error(`  💥 MediaPipe send failed (frame ${frameCount}):`, mediaPipeError)
+                  // Continue processing even if MediaPipe fails
+                }
+              }
+              
+              (window as any)[videoTimeKey] = videoCurrentTime
+            } else {
+              try {
+                await faceMesh.send({ image: video })
+              } catch (mediaPipeError) {
+                console.error(`💥 MediaPipe send failed (visible mode):`, mediaPipeError)
+                // Continue processing even if MediaPipe fails
+              }
             }
-            await faceMesh.send({ image: video })
+          } else {
+            if (isHidden && shouldLog) {
+              console.log(`  ⚠️ Video not ready while hidden: readyState=${video.readyState}, paused=${video.paused}, ended=${video.ended}`)
+            }
           }
-          requestAnimationFrame(process)
         } catch (error) {
           console.error('❌ Error processing video frame:', error)
-          setTimeout(() => requestAnimationFrame(process), 100) // Retry after 100ms
+          if (document.hidden) {
+            console.error('  🔍 Error occurred while tab was hidden')
+          }
         }
       }
       
-      console.log('🎬 Starting video processing loop...')
-      process()
+      // ENHANCED: Use setInterval instead of requestAnimationFrame for background processing
+      const startProcessing = () => {
+        if (processingInterval) {
+          clearInterval(processingInterval)
+        }
+        
+        // Consistent frame rate regardless of visibility
+        const targetInterval = 1000 / 30 // 33ms for 30fps
+        
+        let lastFrameTime = Date.now()
+        let actualIntervals: number[] = []
+        let isProcessing = false // Prevent concurrent MediaPipe calls
+        
+        console.log(`🎬 Starting video processing with setInterval (${targetInterval}ms)...`)
+        
+        // Use setInterval instead of recursive setTimeout
+        processingInterval = setInterval(async () => {
+          // Skip if previous processing is still running
+          if (isProcessing) {
+            if (document.hidden && frameCount % 30 === 0) {
+              console.log(`⚠️ Skipping frame - MediaPipe still processing previous frame`)
+            }
+            return
+          }
+          
+          isProcessing = true
+          
+          try {
+            const now = Date.now()
+            const actualInterval = now - lastFrameTime
+            lastFrameTime = now
+            
+            // Track actual intervals when hidden to detect throttling
+            if (document.hidden) {
+              actualIntervals.push(actualInterval)
+              if (actualIntervals.length > 10) actualIntervals.shift() // Keep last 10
+              
+              // Log throttling detection every 20 frames when hidden
+              if (actualIntervals.length >= 5 && frameCount % 20 === 0) {
+                const avgInterval = actualIntervals.reduce((a, b) => a + b, 0) / actualIntervals.length
+                console.log(`⏱️ SETINTERVAL CHECK: Target=${targetInterval}ms, Actual=${avgInterval.toFixed(1)}ms (${(1000/avgInterval).toFixed(1)}fps)`)
+              }
+            }
+            
+            await process()
+          } catch (error) {
+            console.error('❌ Error in setInterval processing:', error)
+          } finally {
+            isProcessing = false
+          }
+        }, targetInterval)
+      }
+      
+      // Monitor visibility changes (maintaining consistent performance)
+      const handleVisibilityChange = () => {
+        const isHidden = document.hidden
+        console.log(`🔄 PROCESSING: Visibility changed to ${isHidden ? 'HIDDEN' : 'VISIBLE'} - restarting setInterval`)
+        
+        // Restart setInterval to ensure consistency
+        startProcessing()
+      }
+      
+      document.addEventListener('visibilitychange', handleVisibilityChange)
+      startProcessing()
+      
+      // Cleanup function
+      return () => {
+        if (processingInterval) {
+          clearInterval(processingInterval)
+        }
+        document.removeEventListener('visibilitychange', handleVisibilityChange)
+      }
     } else {
       console.warn('⚠️ Video or FaceMesh not ready for processing')
+      // Return empty cleanup function
+      return () => {}
     }
   }
 
   // EXACT PORT: Main detection logic from Python's main loop
-  const onResults = useCallback((results: any) => {
+  const onResults = (results: any) => {
+    const isHidden = document.hidden
+    const now = Date.now()
+    
+    // ENHANCED: Track MediaPipe result frequency when hidden
+    if (isHidden) {
+      const resultsTimeKey = 'lastResultsTime'
+      const lastResultsTime = (window as any)[resultsTimeKey] || 0
+      const timeSinceLastResult = now - lastResultsTime
+      
+      // Log every result when hidden (for the first 20), then sample
+      const resultCount = ((window as any).hiddenResultCount || 0) + 1
+      ;(window as any).hiddenResultCount = resultCount
+      
+      if (resultCount <= 20 || resultCount % 10 === 0) {
+        console.log(`📊 MEDIAPIPE RESULT #${resultCount} while hidden: ${results.multiFaceLandmarks ? 'Face detected' : 'No face'}, ${timeSinceLastResult}ms since last`)
+      }
+      
+      (window as any)[resultsTimeKey] = now
+    } else {
+      // Reset counter when visible
+      ;(window as any).hiddenResultCount = 0
+    }
+    
     if (!results.multiFaceLandmarks || results.multiFaceLandmarks.length === 0) {
       setStatusText('No face detected')
       return
@@ -564,11 +780,7 @@ export default function BlinkDetector() {
     const faceLandmarks = results.multiFaceLandmarks[0]
     const frameWidth = videoRef.current?.videoWidth || 640
     const frameHeight = videoRef.current?.videoHeight || 480
-    
-    // Debug log for calibration phase
-    if (baselineEARBuffer.length < BASELINE_FRAMES) {
-      console.log(`🎯 Calibration frame ${baselineEARBuffer.length + 1}/${BASELINE_FRAMES}`)
-    }
+  
     
     // EXACT PORT: get_eye_landmarks function from Python
     const getEyeLandmarks = (indices: number[]) => {
@@ -599,6 +811,11 @@ export default function BlinkDetector() {
       setBaselineEAR(newBaseline)
       baselineEARRef.current = newBaseline // Keep ref in sync
       setStatusText(`Calibrating... ${newBuffer.length}/${BASELINE_FRAMES}`)
+      
+      // Log calibration progress when hidden
+      if (isHidden) {
+        console.log(`📏 CALIBRATION while hidden: ${newBuffer.length}/${BASELINE_FRAMES}`)
+      }
     } else {
       // EXACT PORT: Main detection logic from Python
       if (baselineEARRef.current === null) return
@@ -611,6 +828,11 @@ export default function BlinkDetector() {
       
       if (bothEyesClosed) {
         consecutiveBlinkFramesRef.current += 1
+        
+        // Log blink detection when hidden
+        if (isHidden && consecutiveBlinkFramesRef.current === 1) {
+          console.log(`👁️ BLINK START detected while hidden: frames=${consecutiveBlinkFramesRef.current}`)
+        }
       } else {
         // Check if we had a valid blink
         if (consecutiveBlinkFramesRef.current >= MIN_BLINK_FRAMES) {
@@ -618,7 +840,7 @@ export default function BlinkDetector() {
           
           setBlinkCount(prev => {
             const newCount = prev + 1
-            console.log(`👁️ Blink #${newCount} | Duration: ${consecutiveBlinkFramesRef.current} frames`)
+            console.log(`👁️ Blink #${newCount} | Duration: ${consecutiveBlinkFramesRef.current} frames${isHidden ? ' (WHILE HIDDEN)' : ''}`)
             return newCount
           })
           
@@ -643,13 +865,24 @@ export default function BlinkDetector() {
       const sessionTime = (Date.now() - startTimeRef.current) / 1000
       setSessionDuration(sessionTime)
       
-      const isLow = currentRate < LOW_BLINK_THRESHOLD
+      const isLow = currentRate < lowBlinkThreshold
       setIsLowRate(isLow && sessionTime >= MIN_SESSION_TIME && blinkTimestampsRef.current.length >= MIN_BLINKS_FOR_ALERT)
+      
+      // Debug logging every 5 seconds to show threshold is active
+      if (Math.floor(sessionTime) % 5 === 0 && Math.floor(sessionTime * 10) % 50 === 0) {
+        console.log(`🔍 Detection: Rate=${currentRate.toFixed(1)}/min, Threshold=${lowBlinkThreshold}/min, IsLow=${isLow}${isHidden ? ' (HIDDEN)' : ''}`)
+      }
       
       // ENHANCED: Fixed cooldown mechanism (prevents endless alerts)
       const currentTime = Date.now()
       const timeSinceLastAlert = currentTime - lastAlertTimeRef.current
       const canAlert = !isAlertActiveRef.current && timeSinceLastAlert > (ALERT_COOLDOWN * 1000)
+      
+      // Debug: Log alert conditions every time they're checked
+      // if (sessionTime >= MIN_SESSION_TIME && blinkTimestampsRef.current.length >= MIN_BLINKS_FOR_ALERT) {
+      //   console.log(`🔍 Alert Check: Rate=${currentRate.toFixed(1)}, Threshold=${lowBlinkThreshold}, IsLow=${isLow}, CanAlert=${canAlert}, TimeSinceAlert=${timeSinceLastAlert}ms`)
+      //   console.log(`💡 Direct threshold access: ${lowBlinkThreshold} (should match slider)`)
+      // }
       
       if (isLow && 
           sessionTime >= MIN_SESSION_TIME && 
@@ -661,7 +894,7 @@ export default function BlinkDetector() {
         lastAlertTimeRef.current = currentTime
         setLastAlertTime(currentTime)
         
-        console.log(`⚠️ Low blink rate alert: ${currentRate.toFixed(1)}/min (cooldown: ${timeSinceLastAlert}ms)`)
+        console.log(`⚠️ LOW BLINK RATE ALERT FIRED: Rate=${currentRate.toFixed(1)}/min vs Threshold=${lowBlinkThreshold}/min${isHidden ? ' (WHILE HIDDEN)' : ''}`)
         
         // ENHANCED: Use multi-method notification system
         showEnhancedNotification(
@@ -676,8 +909,11 @@ export default function BlinkDetector() {
         setShowAlertModal(true)
       }
     }
-    
-  }, [blinkTimestamps, baselineEARBuffer, baselineEAR, startTime, lastAlertTime]) // Removed consecutiveBlinkFrames from deps
+  }
+  
+  // Store the current onResults function in the ref
+  onResultsRef.current = onResults
+  // console.log(`🔄 onResults ref updated with threshold: ${lowBlinkThreshold}`)
 
   // Sync refs with state
   useEffect(() => {
@@ -699,17 +935,19 @@ export default function BlinkDetector() {
   useEffect(() => {
     startTimeRef.current = startTime
   }, [startTime])
+  
+
 
   return (
     <div className="min-h-screen bg-gray-900 text-white p-8">
       <div className="max-w-4xl mx-auto">
         <h1 className="text-3xl font-bold text-center mb-8">
-          👁️ Blink Detector Web (Python Port)
+          👁️ Blink or Die
         </h1>
         
-        <div className="grid md:grid-cols-2 gap-8">
-          {/* Video Section */}
-          <div className="relative">
+                {/* Video Section - Full Width Centered */}
+        <div className="flex justify-center mb-8">
+          <div className="relative max-w-4xl w-full">
             <video
               ref={videoRef}
               className="w-full rounded-lg bg-black"
@@ -722,13 +960,13 @@ export default function BlinkDetector() {
             
             {/* EXACT PORT: Video overlays from Python */}
             <div className="absolute top-4 left-4 space-y-2 text-sm font-mono">
-              <div>L: {leftEAR.toFixed(3)} R: {rightEAR.toFixed(3)}</div>
-              <div>{statusText}</div>
+              {/* <div>L: {leftEAR.toFixed(3)} R: {rightEAR.toFixed(3)}</div> */}
+              {/* <div>{statusText}</div> */}
               <div>Total: {blinkCount}</div>
               <div className={isLowRate ? 'text-red-400' : ''}>
                 Rate: {blinkRate.toFixed(1)}/min
               </div>
-              <div className="text-gray-400">Session: {sessionDuration.toFixed(0)}s</div>
+              {/* <div className="text-gray-400">Session: {sessionDuration.toFixed(0)}s</div> */}
               {isLowRate && (
                 <div className="text-red-500 font-bold animate-pulse">⚠️ LOW RATE</div>
               )}
@@ -747,113 +985,68 @@ export default function BlinkDetector() {
               </div>
             )}
           </div>
-          
-          {/* Stats Panel */}
-          <div className="space-y-6">
-            <div className="bg-gray-800 p-6 rounded-lg">
-              <h2 className="text-xl font-semibold mb-4">📊 Statistics</h2>
-              <div className="space-y-3">
-                <div className="flex justify-between">
-                  <span>Total Blinks:</span>
-                  <span className="font-mono text-xl">{blinkCount}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span>Current Rate:</span>
-                  <span className={`font-mono text-xl ${isLowRate ? 'text-red-400' : 'text-green-400'}`}>
-                    {blinkRate.toFixed(1)}/min
-                  </span>
-                </div>
-                <div className="flex justify-between">
-                  <span>Session Time:</span>
-                  <span className="font-mono">{(sessionDuration / 60).toFixed(1)} min</span>
-                </div>
-                {lastAlertTime > 0 && (
-                  <div className="flex justify-between text-sm text-gray-400">
-                    <span>Next alert in:</span>
-                    <span className="font-mono">
-                      {Math.max(0, ALERT_COOLDOWN - Math.floor((Date.now() - lastAlertTime) / 1000))}s
-                    </span>
-                  </div>
-                )}
-                {lastResetTime && sessionDuration < 60 && (
-                  <div className="flex justify-between text-sm text-green-400">
-                    <span>Fresh session:</span>
-                    <span className="font-mono">
-                      {lastResetTime.toLocaleTimeString()}
-                    </span>
-                  </div>
-                )}
+        </div>
+        
+        {/* Control Panel - Below Video */}
+        <div className="max-w-2xl mx-auto">
+          <div className="bg-gray-800 p-6 rounded-lg">
+            <h2 className="text-xl font-semibold mb-4">⚙️ Target Blink Rate</h2>
+            
+            {/* Configurable Alert Threshold */}
+            <div className="mb-6">
+              <label className="block text-sm font-medium mb-3">
+                🚨 Alert Threshold: <span className="text-lg font-mono text-yellow-400">{lowBlinkThreshold}</span> blinks/min
+              </label>
+              <input
+                type="range"
+                min="5"
+                max="25"
+                step="1"
+                value={lowBlinkThreshold}
+                onChange={(e) => {
+                  const newValue = Number(e.target.value)
+                  console.log(`🎚️ Slider changed: ${lowBlinkThreshold} → ${newValue} (onResults ref will be updated on next render)`)
+                  setLowBlinkThreshold(newValue)
+                }}
+                className="w-full h-2 bg-gray-600 rounded-lg appearance-none cursor-pointer slider"
+              />
+              <div className="flex justify-between text-xs text-gray-400 mt-1">
+                <span>5-8/min<br/>(Focused Tasks)</span>
+                <span>15-20/min<br/>(Normal Rate)</span>
+                <span>25/min</span>
               </div>
             </div>
             
-            <div className="bg-gray-800 p-6 rounded-lg">
-              <h2 className="text-xl font-semibold mb-4">⚙️ Python Settings</h2>
-              <div className="space-y-2 text-sm">
-                <div>Window: {ROLLING_WINDOW_MINUTES} minutes</div>
-                <div>Alert threshold: {LOW_BLINK_THRESHOLD}/min</div>
-                <div>EAR threshold: {(EAR_THRESHOLD_RATIO * 100).toFixed(0)}% of baseline</div>
-                <div>Min blink duration: {MIN_BLINK_FRAMES} frames</div>
-                {baselineEAR && (
-                  <div>Baseline EAR: {baselineEAR.toFixed(3)}</div>
-                )}
+            {/* Debug Controls */}
+            <div className="mt-4 pt-4 border-t border-gray-600">
+              <h3 className="text-sm font-semibold mb-2">🛠️ Debug Controls</h3>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                <button 
+                  onClick={resetCalibration}
+                  className="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded text-sm font-medium transition-colors"
+                >
+                  Reset Calibration
+                </button>
+                <button 
+                  onClick={() => {
+                    setAlertMessage('Test notification: 5.0/min\nTake a break and blink more!')
+                    setAlertRate(5.0)
+                    setShowAlertModal(true)
+                    showEnhancedNotification('👁️ Test Alert', 'This is a test of the notification system')
+                  }}
+                  className="bg-yellow-600 hover:bg-yellow-700 px-4 py-2 rounded text-sm font-medium transition-colors"
+                >
+                  🔔 Test Notifications
+                </button>
+                <button 
+                  onClick={resetBlinkTracking}
+                  className="bg-green-600 hover:bg-green-700 px-4 py-2 rounded text-sm font-medium transition-colors"
+                >
+                  🔄 Reset Session
+                </button>
               </div>
-            </div>
-            
-            <div className="bg-gray-800 p-6 rounded-lg">
-              <h2 className="text-xl font-semibold mb-4">🎯 Instructions</h2>
-              <ul className="space-y-2 text-sm">
-                <li>• Look at camera normally for calibration</li>
-                <li>• Algorithm adapts to your baseline</li>
-                <li>• Same logic as working Python version</li>
-                <li>• Green rate = healthy, red = take a break</li>
-                <li>• <strong>Enable notifications</strong> for cross-tab alerts</li>
-                <li>• Audio alerts work even in background tabs</li>
-                <li>• <strong>Dismissing alerts resets tracking</strong> (fresh start)</li>
-                <li>• <strong>Total blinks</strong> are cumulative (never reset)</li>
-              </ul>
-              
-              <div className="mt-4 pt-4 border-t border-gray-600">
-                <h3 className="text-sm font-semibold mb-2">⌨️ Keyboard Shortcuts</h3>
-                <ul className="space-y-1 text-xs text-gray-300">
-                  <li>• <kbd className="bg-gray-700 px-1 rounded">Q</kbd> - Quit application</li>
-                  <li>• <kbd className="bg-gray-700 px-1 rounded">T</kbd> - Test notifications</li>
-                  <li>• <kbd className="bg-gray-700 px-1 rounded">R</kbd> - Reset calibration</li>
-                                      <li>• <kbd className="bg-gray-700 px-1 rounded">S</kbd> - Reset session (keep total)</li>
-                  <li>• <kbd className="bg-gray-700 px-1 rounded">ESC</kbd> - Dismiss alerts</li>
-                </ul>
-              </div>
-              
-              {/* Debug Controls */}
-              <div className="mt-4 pt-4 border-t border-gray-600">
-                <h3 className="text-sm font-semibold mb-2">🛠️ Debug Controls</h3>
-                <div className="space-y-2">
-                  <button 
-                    onClick={resetCalibration}
-                    className="w-full bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded text-sm font-medium transition-colors"
-                  >
-                    Reset Calibration
-                  </button>
-                  <button 
-                    onClick={() => {
-                      setAlertMessage('Test notification: 5.0/min\nTake a break and blink more!')
-                      setAlertRate(5.0)
-                      setShowAlertModal(true)
-                      showEnhancedNotification('👁️ Test Alert', 'This is a test of the notification system')
-                    }}
-                    className="w-full bg-yellow-600 hover:bg-yellow-700 px-4 py-2 rounded text-sm font-medium transition-colors"
-                  >
-                    🔔 Test Notifications
-                  </button>
-                  <button 
-                    onClick={resetBlinkTracking}
-                    className="w-full bg-green-600 hover:bg-green-700 px-4 py-2 rounded text-sm font-medium transition-colors"
-                  >
-                    🔄 Reset Session (Keep Total)
-                  </button>
-                </div>
-                <div className="text-xs text-gray-400 mt-2">
-                  Calibration: {baselineEARBufferRef.current.length}/{BASELINE_FRAMES}
-                </div>
+              <div className="text-xs text-gray-400 mt-2 text-center">
+                Calibration: {baselineEARBufferRef.current.length}/{BASELINE_FRAMES}
               </div>
             </div>
           </div>

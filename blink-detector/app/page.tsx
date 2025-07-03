@@ -412,13 +412,7 @@ export default function BlinkDetector() {
             window.close()
           }
           break
-        case 't':
-          // Test notification
-          setAlertMessage('Test notification: 5.0/min\nTake a break and blink more!')
-          setAlertRate(5.0)
-          setShowAlertModal(true)
-          showEnhancedNotification('👁️ Test Alert', 'This is a test of the notification system')
-          break
+
         case 'r':
           // Reset calibration
           resetCalibration()
@@ -939,157 +933,187 @@ export default function BlinkDetector() {
 
 
   return (
-    <div className="min-h-screen bg-gray-900 text-white p-8">
-      <div className="max-w-4xl mx-auto">
-        <h1 className="text-3xl font-bold text-center mb-8">
-          👁️ Blink or Die
-        </h1>
-        
-                {/* Video Section - Full Width Centered */}
-        <div className="flex justify-center mb-8">
-          <div className="relative max-w-4xl w-full">
-            <video
-              ref={videoRef}
-              className="w-full rounded-lg bg-black"
-              width="640"
-              height="480"
-              autoPlay
-              playsInline
-              muted
-            />
-            
-            {/* EXACT PORT: Video overlays from Python */}
-            <div className="absolute top-4 left-4 space-y-2 text-sm font-mono">
-              {/* <div>L: {leftEAR.toFixed(3)} R: {rightEAR.toFixed(3)}</div> */}
-              {/* <div>{statusText}</div> */}
-              <div>Total: {blinkCount}</div>
-              <div className={isLowRate ? 'text-red-400' : ''}>
-                Rate: {blinkRate.toFixed(1)}/min
-              </div>
-              {/* <div className="text-gray-400">Session: {sessionDuration.toFixed(0)}s</div> */}
-              {isLowRate && (
-                <div className="text-red-500 font-bold animate-pulse">⚠️ LOW RATE</div>
-              )}
+    <div className="min-h-screen bg-white text-gray-900 font-light">
+      <div className="max-w-6xl mx-auto px-4 py-8">
+        {/* Header with Cubist Eye */}
+        <div className="text-center mb-12">
+          <div className="flex items-center justify-center mb-6">
+            {/* Cubist Eye Image */}
+            <div className="w-24 h-24 mr-4 flex items-center justify-center">
+              <img 
+                src="/eye_art.webp"
+                srcSet="/eye_art.webp 1x, /eye_art_high_dpi.webp 2x"
+                alt="Cubist eye artwork"
+                className="w-full h-full object-cover rounded-full border border-gray-200"
+              />
             </div>
-            
-            {/* ENHANCED: Persistent visual alert (like Python's on-screen warning) */}
-            {isLowRate && (
-              <div className="absolute inset-0 pointer-events-none">
-                {/* Flashing border effect */}
-                <div className="absolute inset-0 border-4 border-red-500 rounded-lg animate-pulse opacity-75"></div>
-                {/* Corner alert indicators */}
-                <div className="absolute top-2 right-2 text-red-500 text-2xl animate-bounce">⚠️</div>
-                <div className="absolute bottom-2 left-2 text-red-500 text-lg font-bold animate-pulse bg-red-900 bg-opacity-75 px-2 py-1 rounded">
-                  BLINK MORE!
-                </div>
-              </div>
-            )}
+            <div>
+              <h1 className="text-4xl font-extralight text-gray-800 tracking-wide">
+                Blink or Die
+              </h1>
+              <p className="text-gray-500 text-sm mt-1">Eye strain prevention system</p>
+            </div>
           </div>
         </div>
         
-        {/* Control Panel - Below Video */}
-        <div className="max-w-2xl mx-auto">
-          <div className="bg-gray-800 p-6 rounded-lg">
-            <h2 className="text-xl font-semibold mb-4">⚙️ Target Blink Rate</h2>
-            
-            {/* Configurable Alert Threshold */}
-            <div className="mb-6">
-              <label className="block text-sm font-medium mb-3">
-                🚨 Alert Threshold: <span className="text-lg font-mono text-yellow-400">{lowBlinkThreshold}</span> blinks/min
-              </label>
-              <input
-                type="range"
-                min="5"
-                max="25"
-                step="1"
-                value={lowBlinkThreshold}
-                onChange={(e) => {
-                  const newValue = Number(e.target.value)
-                  console.log(`🎚️ Slider changed: ${lowBlinkThreshold} → ${newValue} (onResults ref will be updated on next render)`)
-                  setLowBlinkThreshold(newValue)
-                }}
-                className="w-full h-2 bg-gray-600 rounded-lg appearance-none cursor-pointer slider"
-              />
-              <div className="flex justify-between text-xs text-gray-400 mt-1">
-                <span>5-8/min<br/>(Focused Tasks)</span>
-                <span>15-20/min<br/>(Normal Rate)</span>
-                <span>25/min</span>
+        {/* Main Content Grid */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+          
+          {/* Video Section - Takes up 2/3 of the space */}
+          <div className="lg:col-span-2">
+            <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+              <div className="relative">
+                <video
+                  ref={videoRef}
+                  className="w-full h-auto bg-gray-50"
+                  width="640"
+                  height="480"
+                  autoPlay
+                  playsInline
+                  muted
+                />
+                
+                {/* Video overlays with clean styling */}
+                <div className="absolute top-4 left-4 space-y-2">
+                  <div className="bg-white bg-opacity-90 px-3 py-1 rounded-full text-sm text-gray-700 font-mono">
+                    {blinkCount} blinks
+                  </div>
+                  <div className={`px-3 py-1 rounded-full text-sm font-mono ${
+                    isLowRate 
+                      ? 'bg-red-50 text-red-700 border border-red-200' 
+                      : 'bg-white bg-opacity-90 text-gray-700'
+                  }`}>
+                    {blinkRate.toFixed(1)}/min
+                  </div>
+                  {isLowRate && (
+                    <div className="bg-red-50 text-red-700 px-3 py-1 rounded-full text-sm font-medium border border-red-200 animate-pulse">
+                      ⚠ Low rate
+                    </div>
+                  )}
+                </div>
+                
+                {/* Enhanced visual alert for low rate */}
+                {isLowRate && (
+                  <div className="absolute inset-0 pointer-events-none">
+                    <div className="absolute inset-0 border-2 border-red-300 rounded-2xl animate-pulse"></div>
+                    <div className="absolute top-4 right-4 text-red-500 text-xl animate-bounce">⚠</div>
+                    <div className="absolute bottom-4 left-4 bg-red-50 text-red-700 px-3 py-1 rounded-full text-sm font-medium border border-red-200">
+                      Blink more frequently
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
-            
-            {/* Debug Controls */}
-            <div className="mt-4 pt-4 border-t border-gray-600">
-              <h3 className="text-sm font-semibold mb-2">🛠️ Debug Controls</h3>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+          </div>
+          
+          {/* Control Panel - Takes up 1/3 of the space */}
+          <div className="lg:col-span-1">
+            <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
+              <h2 className="text-xl font-light text-gray-800 mb-6">Settings</h2>
+              
+              {/* Alert Threshold */}
+              <div className="mb-8">
+                <label className="block text-sm font-medium text-gray-700 mb-3">
+                  Alert Threshold
+                </label>
+                <div className="text-2xl font-light text-gray-900 mb-3">
+                  {lowBlinkThreshold} <span className="text-sm text-gray-500">blinks/min</span>
+                </div>
+                <input
+                  type="range"
+                  min="5"
+                  max="25"
+                  step="1"
+                  value={lowBlinkThreshold}
+                  onChange={(e) => {
+                    const newValue = Number(e.target.value)
+                    console.log(`🎚️ Slider changed: ${lowBlinkThreshold} → ${newValue} (onResults ref will be updated on next render)`)
+                    setLowBlinkThreshold(newValue)
+                  }}
+                  className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer"
+                  style={{
+                    background: `linear-gradient(to right, #f3f4f6 0%, #f3f4f6 ${((lowBlinkThreshold - 5) / 20) * 100}%, #e5e7eb ${((lowBlinkThreshold - 5) / 20) * 100}%, #e5e7eb 100%)`
+                  }}
+                />
+                <div className="flex justify-between text-xs text-gray-400 mt-2">
+                  <span>Focus<br/>5-8</span>
+                  <span>Normal<br/>15-20</span>
+                  <span>High<br/>25</span>
+                </div>
+              </div>
+              
+              {/* Status */}
+              <div className="mb-6 p-4 bg-gray-50 rounded-xl">
+                <div className="text-sm text-gray-600 space-y-1">
+                  <div>Calibration: {baselineEARBufferRef.current.length}/{BASELINE_FRAMES}</div>
+                  <div>Session: {sessionDuration.toFixed(0)}s</div>
+                  {lastResetTime && (
+                    <div className="text-xs text-gray-500">
+                      Last reset: {lastResetTime.toLocaleTimeString()}
+                    </div>
+                  )}
+                </div>
+              </div>
+              
+              {/* Controls */}
+              <div className="space-y-3">
                 <button 
                   onClick={resetCalibration}
-                  className="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded text-sm font-medium transition-colors"
+                  className="w-full bg-gray-50 hover:bg-gray-100 text-gray-700 py-3 px-4 rounded-xl text-sm font-medium transition-colors border border-gray-200"
                 >
                   Reset Calibration
                 </button>
-                <button 
-                  onClick={() => {
-                    setAlertMessage('Test notification: 5.0/min\nTake a break and blink more!')
-                    setAlertRate(5.0)
-                    setShowAlertModal(true)
-                    showEnhancedNotification('👁️ Test Alert', 'This is a test of the notification system')
-                  }}
-                  className="bg-yellow-600 hover:bg-yellow-700 px-4 py-2 rounded text-sm font-medium transition-colors"
-                >
-                  🔔 Test Notifications
-                </button>
+
                 <button 
                   onClick={resetBlinkTracking}
-                  className="bg-green-600 hover:bg-green-700 px-4 py-2 rounded text-sm font-medium transition-colors"
+                  className="w-full bg-gray-50 hover:bg-gray-100 text-gray-700 py-3 px-4 rounded-xl text-sm font-medium transition-colors border border-gray-200"
                 >
-                  🔄 Reset Session
+                  Reset Session
                 </button>
-              </div>
-              <div className="text-xs text-gray-400 mt-2 text-center">
-                Calibration: {baselineEARBufferRef.current.length}/{BASELINE_FRAMES}
               </div>
             </div>
           </div>
         </div>
         
-        {/* ENHANCED: Alert Modal (like Python's system dialog) */}
+        {/* ENHANCED: Alert Modal with clean styling */}
         {showAlertModal && (
           <div 
-            className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-[9999]"
+            className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[9999]"
             onClick={(e) => {
-              // Only dismiss if clicking the backdrop (not the modal content)
               if (e.target === e.currentTarget) {
                 dismissAlert()
               }
             }}
           >
             <div 
-              className="bg-red-600 border-4 border-red-400 rounded-lg p-8 max-w-md mx-4 shadow-2xl transform scale-105 animate-pulse"
-              onClick={(e) => e.stopPropagation()} // Prevent backdrop click when clicking modal content
+              className="bg-white rounded-2xl p-8 max-w-md mx-4 shadow-2xl border border-gray-200"
+              onClick={(e) => e.stopPropagation()}
             >
               <div className="text-center">
                 {/* Alert Icon */}
-                <div className="text-6xl mb-4">⚠️</div>
+                <div className="w-16 h-16 bg-red-50 rounded-full flex items-center justify-center mx-auto mb-4">
+                  <span className="text-2xl text-red-600">⚠</span>
+                </div>
                 
-                {/* Title (like Python's dialog title) */}
-                <h2 className="text-2xl font-bold text-white mb-4">
-                  👁️ Blink Rate Alert
+                {/* Title */}
+                <h2 className="text-2xl font-light text-gray-900 mb-4">
+                  Low Blink Rate
                 </h2>
                 
-                {/* Message (like Python's dialog message) */}
-                <div className="text-white text-lg mb-6 leading-relaxed">
-                  <div className="font-mono text-xl mb-2">
-                    Rate: {alertRate.toFixed(1)}/min
+                {/* Message */}
+                <div className="text-gray-700 mb-6">
+                  <div className="text-3xl font-light mb-2 text-red-600">
+                    {alertRate.toFixed(1)}/min
                   </div>
-                  <div className="mb-4">
-                    🚨 Your blink rate is too low!
+                  <div className="text-lg mb-4">
+                    Your blink rate is too low
                   </div>
-                  <div className="text-base">
+                  <div className="text-sm text-gray-600">
                     Take a break and blink more consciously
                   </div>
                 </div>
                 
-                {/* Action buttons (like Python's dialog buttons) */}
+                {/* Action button */}
                 <div className="space-y-3">
                   <button
                     onClick={(e) => {
@@ -1098,12 +1122,12 @@ export default function BlinkDetector() {
                       console.log('🔴 Alert dismissed by user click')
                       dismissAlert()
                     }}
-                    className="w-full bg-white text-red-600 font-bold py-3 px-6 rounded-lg hover:bg-gray-100 active:bg-gray-200 transition-colors cursor-pointer select-none"
+                    className="w-full bg-gray-900 hover:bg-gray-800 text-white py-3 px-6 rounded-xl font-medium transition-colors"
                     type="button"
                   >
-                    OK, I'll Take a Break
+                    Got it, I'll take a break
                   </button>
-                  <div className="text-red-200 text-sm">
+                  <div className="text-gray-400 text-xs">
                     Auto-dismiss in 8 seconds • Press ESC to close
                   </div>
                 </div>

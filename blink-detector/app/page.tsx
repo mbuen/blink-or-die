@@ -949,9 +949,9 @@ export default function BlinkDetector() {
             </div>
             <div>
               <h1 className="text-4xl font-extralight text-gray-800 tracking-wide">
-                Blink or Die
+                Blinkasso
               </h1>
-              <p className="text-gray-500 text-sm mt-1">Eye strain prevention system</p>
+              <p className="text-gray-500 text-sm mt-1">Do not end up with cubist eyes like Picasso</p>
             </div>
           </div>
         </div>

@@ -32,7 +32,7 @@ const ROLLING_WINDOW_MINUTES = 4  // Note: Python has bug, shows 2 but uses 4
 // Alert parameters (EXACT COPY FROM PYTHON) 
 const DEFAULT_LOW_BLINK_THRESHOLD = 10
 const ALERT_COOLDOWN = 5  // seconds
-const MIN_SESSION_TIME = 0  // seconds
+const MIN_SESSION_TIME = 5  // seconds
 const MIN_BLINKS_FOR_ALERT = 3
 
 interface EyeLandmark {
